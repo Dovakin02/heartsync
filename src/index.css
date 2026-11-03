@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/* --- iOS Safari Overrides --- */
+
+/* 1. Force 16px to completely disable auto-zoom */
+/* 2. Strip bulky native Apple UI from inputs */
+/* 3. Force exact same height for all text and date inputs */
+input, select, textarea {
+  font-size: 16px !important; 
+  -webkit-appearance: none !important; 
+  appearance: none !important;
+  height: 46px !important; 
+}
+
+/* Fix vertical text alignment inside Apple's native date picker */
+input[type="date"] {
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Force iOS date inputs to match text input widths */
+input[type="date"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
