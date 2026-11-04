@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "HeartSync",
+    "slug": "heartsync",
+    "version": "1.0.0",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.dovakin.heartsync"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6594129b-4edc-426f-8da9-37a354a3ddb5"
+      }
+    }
+  }
+}
