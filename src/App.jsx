@@ -44,8 +44,8 @@ import CalendarView from './components/CalendarView';
 import MemoriesView from './components/MemoriesView';
 import ProfileView from './components/ProfileView';
 import { themeClasses } from './theme';
+import { calculateDistance, getCoordinates } from './utils/distance';
 
-// Replace with your actual Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDRR9ZnLv-Rn2N5pglFReS5CpXNZ2KKB78",
   authDomain: "heartsync-add6c.firebaseapp.com",
@@ -79,9 +79,15 @@ export default function App() {
     bio: '',
     avatarUrl: '',
     partnerId: '',
-    pairCode: ''
+    pairCode: '',
+    location: ''
   });
   const [partnerProfile, setPartnerProfile] = useState(null);
+
+  // Distance & Coordinates State
+  const [distance, setDistance] = useState(null);
+  const [userCoords, setUserCoords] = useState({ lat: null, lon: null });
+  const [partnerCoords, setPartnerCoords] = useState({ lat: null, lon: null });
 
   // App Sync Data
   const [notes, setNotes] = useState([]);
@@ -112,7 +118,8 @@ export default function App() {
             avatarUrl: currentUser.photoURL || '',
             bio: 'HeartSync user',
             pairCode: generatedCode,
-            partnerId: ''
+            partnerId: '',
+            location: ''
           });
         }
       }
@@ -122,24 +129,54 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Monitor Profile & Partner Data
+  // Monitor Profile and Partner Data, and compute distance and coordinates safely
   useEffect(() => {
     if (!user) return;
     const userRef = ref(db, `users/${user.uid}`);
-    const unsubUser = onValue(userRef, (snapshot) => {
+    const unsubUser = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
       if (data) {
         setUserProfile(data);
+
+        // Get user coords
+        let uCoords = { lat: null, lon: null };
+        if (data.location) {
+          uCoords = await getCoordinates(data.location);
+          setUserCoords(uCoords);
+        }
+
         if (data.partnerId) {
-          get(ref(db, `users/${data.partnerId}`)).then((pSnap) => {
-            if (pSnap.exists()) setPartnerProfile(pSnap.val());
-          });
+          const pSnap = await get(ref(db, `users/${data.partnerId}`));
+          if (pSnap.exists()) {
+            const pData = pSnap.val();
+            setPartnerProfile(pData);
+
+            let pCoords = { lat: null, lon: null };
+            if (pData.location) {
+              pCoords = await getCoordinates(pData.location);
+              setPartnerCoords(pCoords);
+            }
+
+            // Compute distance if both have coordinates
+            if (uCoords.lat !== null && pCoords.lat !== null) {
+              const dist = calculateDistance(uCoords.lat, uCoords.lon, pCoords.lat, pCoords.lon);
+              setDistance(dist);
+            }
+          } else {
+            setPartnerProfile(null);
+            setPartnerCoords({ lat: null, lon: null });
+            setDistance(null);
+          }
+        } else {
+          setPartnerProfile(null);
+          setPartnerCoords({ lat: null, lon: null });
+          setDistance(null);
         }
       }
     });
 
     return () => unsubUser();
-  }, [user]);
+  }, [user?.uid, userProfile.partnerId, userProfile.location]);
 
   // Shared Key generation
   const sharedKey = userProfile.partnerId
@@ -207,7 +244,12 @@ export default function App() {
     }
   };
 
-  // Pairing & Profile Handlers
+  const handleSaveLocation = async (location) => {
+    if (!user) return;
+    await set(ref(db, `users/${user.uid}/location`), location);
+    alert('Location saved successfully!');
+  };
+
   const handlePair = async (e) => {
     e.preventDefault();
     if (!targetPairCode.trim()) return;
@@ -229,6 +271,18 @@ export default function App() {
     }
   };
 
+  const handleRemovePartner = async () => {
+    if (window.confirm("Are you sure you want to disconnect from your partner?")) {
+      const partnerId = userProfile.partnerId;
+      if (partnerId) {
+        await set(ref(db, `users/${partnerId}/partnerId`), '');
+      }
+      await set(ref(db, `users/${user.uid}/partnerId`), '');
+      setPartnerProfile(null);
+      setDistance(null);
+    }
+  };
+
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -243,7 +297,6 @@ export default function App() {
     }
   };
 
-  // Action Helpers
   const addActivity = (text, icon = '✨') => {
     setActivities((prev) => [
       { id: Date.now(), text, time: 'Just now', icon },
@@ -274,26 +327,11 @@ export default function App() {
     });
   };
 
-  const handleMemoryImageUpload = async (file) => {
-    if (!file) return null;
-    try {
-      // Creates a unique file path in Firebase Storage for the shared memory
-      const imgRef = storageRef(storage, `memories/${sharedKey}_${Date.now()}_${file.name}`);
-      await uploadBytes(imgRef, file);
-      return await getDownloadURL(imgRef);
-    } catch (err) {
-      console.error(err);
-      return null;
-    }
-  };
-
   useEffect(() => {
     document.body.style.backgroundColor = darkMode ? '#020617' : '#fff1f2';
-    // This stops the whole app from bouncing when you drag up and down
     document.body.classList.add('overscroll-none');
   }, [darkMode]);
 
-  // Auth Screen
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
@@ -356,16 +394,19 @@ export default function App() {
   const partnerData = {
     user: {
       name: userProfile.displayName || 'You',
-      location: 'Your Location',
+      location: userProfile.location || 'Your Location',
       flag: '📍',
       avatar: userProfile.avatarUrl || 'https://via.placeholder.com/150'
     },
     partner: {
       name: partnerProfile?.displayName || 'Partner',
-      location: 'Remote',
+      location: partnerProfile?.location || 'Remote',
       flag: '✈️',
       avatar: partnerProfile?.avatarUrl || 'https://via.placeholder.com/150'
-    }
+    },
+    distance: distance,
+    userLon: userCoords.lon,
+    partnerLon: partnerCoords.lon
   };
 
   const navTabs = [
@@ -379,7 +420,6 @@ export default function App() {
 
   return (
     <div className={themeClasses.wrapper(darkMode)}>
-      {/* Top Header */}
       <header className={themeClasses.header(darkMode)}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 gap-3">
@@ -395,7 +435,6 @@ export default function App() {
               </span>
             </div>
 
-            {/* Desktop Navigation (Hidden on Mobile) */}
             <nav className={themeClasses.desktopNavContainer(darkMode)}>
               {navTabs.map((tab) => {
                 const Icon = tab.icon;
@@ -436,7 +475,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* View Router - Added pb-32 so the bottom nav doesn't cover content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-32 md:pb-8">
         {activeTab === 'dashboard' && (
           <DashboardView
@@ -487,6 +525,9 @@ export default function App() {
             user={user}
             userProfile={userProfile}
             partnerProfile={partnerProfile}
+            userLocation={userProfile.location}
+            onSaveLocation={handleSaveLocation}
+            handleRemovePartner={handleRemovePartner}
             handleSaveProfile={async (name, bio) => {
               await set(ref(db, `users/${user.uid}/displayName`), name);
               await set(ref(db, `users/${user.uid}/bio`), bio);
@@ -502,7 +543,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Instagram-Style Mobile Bottom Navigation */}
       <nav className={themeClasses.mobileNavContainer(darkMode)}>
         {navTabs.map((tab) => {
           const Icon = tab.icon;

@@ -12,6 +12,10 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
   const [locationInput, setLocationInput] = useState(countdown.location);
   const [noteInput, setNoteInput] = useState(countdown.note);
 
+  const [userTime, setUserTime] = useState('--:--');
+  const [partnerTime, setPartnerTime] = useState('--:--');
+  const [hourDiffText, setHourDiffText] = useState('0 Hours');
+
   const calculateTimeLeft = () => {
     const diff = new Date(countdown.targetDate) - new Date();
     if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, passed: true };
@@ -33,19 +37,52 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
     return () => clearInterval(timer);
   }, [countdown.targetDate]);
 
+  // Dynamically calculate clock from longitude coordinate (15 degrees = 1 hour)
+  const getTimeFromLongitude = (now, lon) => {
+    if (lon === undefined || lon === null) return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const targetOffsetMs = (lon / 15) * 3600000;
+    const localTargetDate = new Date(utcMs + targetOffsetMs);
+
+    return localTargetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  useEffect(() => {
+    const updateClocks = () => {
+      const now = new Date();
+
+      const uStr = getTimeFromLongitude(now, partners.userLon);
+      const pStr = getTimeFromLongitude(now, partners.partnerLon);
+
+      setUserTime(uStr);
+      setPartnerTime(pStr);
+
+      // Compute exact hour offset based on longitudes
+      if (partners.userLon !== undefined && partners.partnerLon !== undefined && partners.userLon !== null && partners.partnerLon !== null) {
+        const diffHours = Math.round(Math.abs(partners.userLon - partners.partnerLon) / 15);
+        setHourDiffText(`${diffHours} Hours`);
+      }
+    };
+
+    updateClocks();
+    const interval = setInterval(updateClocks, 1000);
+    return () => clearInterval(interval);
+  }, [partners.userLon, partners.partnerLon]);
+
   const handleSaveCountdown = (e) => {
     e.preventDefault();
-    const updated = {
+    setCountdown({
       title: titleInput,
       targetDate: dateInput,
       location: locationInput,
       note: noteInput
-    };
-    setCountdown(updated);
+    });
     setEditingCountdown(false);
     addActivity(`Updated reunion countdown: "${titleInput}"`);
   };
 
+  const distanceKm = partners.distance ? Math.round(partners.distance) : null;
   const pinnedNotes = notes.filter(n => n.pinned).slice(0, 3);
   const upcomingEvents = [...events].sort((a,b) => new Date(a.date) - new Date(b.date)).slice(0, 3);
 
@@ -54,6 +91,7 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
       {/* Timezone & Partner Status Banner */}
       <div className={themeClasses.card(darkMode)}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          {/* User Card */}
           <div className="flex items-center space-x-4">
             <div className="relative">
               <img src={partners.user.avatar} alt={partners.user.name} className="w-16 h-16 rounded-2xl object-cover ring-4 ring-rose-400/25" />
@@ -63,14 +101,15 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
               <h3 className="font-bold text-lg">{partners.user.name}</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center space-x-1">
                 <MapPin className="w-3 h-3 text-rose-500" />
-                <span>{partners.user.location}</span>
+                <span>{partners.user.location || 'Your Location'}</span>
               </p>
               <p className="text-xs font-semibold text-rose-500 mt-1">
-                Local Time: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                Local Time: {userTime}
               </p>
             </div>
           </div>
 
+          {/* Dynamic Sync Center Card */}
           <div className="flex flex-col items-center justify-center py-2 md:py-0 border-y md:border-y-0 md:border-x border-slate-200/60 dark:border-slate-800">
             <div className="flex items-center space-x-2 text-rose-500 animate-pulse">
               <Sparkles className="w-4 h-4" />
@@ -78,22 +117,23 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
               <Sparkles className="w-4 h-4" />
             </div>
             <div className="text-2xl font-black bg-gradient-to-r from-rose-500 to-pink-600 bg-clip-text text-transparent my-1">
-              5,950 miles
+              {distanceKm ? `${distanceKm.toLocaleString()} km` : 'Set locations'}
             </div>
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              9 Hours Time Difference ⏰
+              {hourDiffText} Time Difference ⏰
             </span>
           </div>
 
+          {/* Partner Card */}
           <div className="flex items-center space-x-4 md:justify-end">
             <div className="text-left md:text-right">
               <h3 className="font-bold text-lg">{partners.partner.name}</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center space-x-1 md:justify-end">
                 <MapPin className="w-3 h-3 text-rose-500" />
-                <span>{partners.partner.location}</span>
+                <span>{partners.partner.location || 'Remote'}</span>
               </p>
               <p className="text-xs font-semibold text-pink-500 mt-1">
-                Local Time: {new Date(new Date().getTime() + 9 * 3600 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                Local Time: {partnerTime}
               </p>
             </div>
             <div className="relative">
@@ -188,7 +228,7 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
         </div>
       </div>
 
-      {/* Three Column Widgets Grid */}
+      {/* Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className={themeClasses.card(darkMode)}>
           <div className="flex justify-between items-center mb-4">
@@ -232,7 +272,7 @@ export default function DashboardView({ countdown, setCountdown, partners, notes
                 <div className="text-2xl p-2 rounded-xl bg-white dark:bg-slate-800 shadow-sm">{evt.icon}</div>
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-sm truncate">{evt.title}</h4>
-                  <p className="text-xs text-purple-600 dark:text-purple-300 mt-0.5">{evt.date} • {evt.time}</p>
+                  <p className="text-xs text-purple-600 dark:text-purple-300 mt-0.5">{evt.date} {evt.time}</p>
                 </div>
               </div>
             ))}
