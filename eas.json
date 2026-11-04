@@ -8,6 +8,7 @@
         "buildType": "apk"
       },
       "ios": {
+        "scheme": "App",
         "simulator": false
       }
     }
